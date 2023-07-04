@@ -1,0 +1,818 @@
+########################################################################################
+# Eudriano Costa
+# R codes used in the article " Bapista et al. (2020). Does consistent individual variability 
+# in pelagic fish larval behaviour affect recruitment in nursery habitats?"
+
+# This code was used to perform linear mixed-effects models with multiple response variables 
+# (multivariate mixed models) to evaluate the relationship among activity (ACT), exploration (EXP), 
+# and exploratory activity index (EAI) at the individual level. The model was specified as follows: 
+# value ~ trait - 1 + (trait - 1 | units), where value represents the numerical variable of the five 
+# measures for each unit (individual). Trait is a categorical variable containing ACT, EXP, and EAI 
+# inserted as fixed effects, while units is a random effect with each individual inserted as a categorical 
+# variable. Additionally, to calculate repeatability, either PI or EAI was included as the response variable,
+# age as a fixed effect, and individuals as a random effect. Confidence intervals and intercepts for each model 
+# were obtained using 1000 bootstrap replicates.
+
+# Baptista, V., Costa, E.F.S., Carere, C. et al. Does consistent individual variability in pelagic fish 
+# larval behaviour affect recruitment in nursery habitats?. Behav Ecol Sociobiol 74, 67 (2020).
+# doi:https://doi.org/10.1007/s00265-020-02841-0
+#---------------------------------------------------------------------------------------
+
+#--- Set directory and load/install packages -------------------------------------------
+setwd("D:/R_Ecoreach/VB_Pers")
+options(scipen = 999)# remove scientific notation
+library(MCMCglmm)
+library(lme4)
+library(brms)
+library(tidyr)
+library(dplyr)
+library(corrplot)
+library(broom.mixed)
+library(dotwhisker)
+library(ggplot2); theme_set(theme_bw())
+
+#---------------------------------------------------------------------------------------
+#--- Import data set and run the first model
+
+VB_MC<-read.csv("VB_MCMC.csv",dec=",",sep=";",header=T,as.is=T)
+str(VB_MC)
+head(VB_MC)
+
+Age<-as.factor(VB_MC$Age)
+Replicate<-as.factor(VB_MC$Replicate)
+Treatment<-as.factor(VB_MC$Treatment)
+Units<-as.factor(VB_MC$Units)
+Trait<-as.factor(VB_MC$Trait)
+Value<-as.numeric(VB_MC$Value)
+EAI<-as.numeric(VB_MC$EAI)
+
+VB_MC_N<- data.frame(Units,Treatment,Replicate, Age,Trait,Value,
+                     stringsAsFactors = FALSE)
+saveRDS(VB_MC_N, file="VB_MC_N.rds")
+str(VB_MC_N)
+
+t1 <- system.time(
+  lmer1 <- lmer(Value ~ Trait- 1 +
+                  (Trait-1|Replicate) + (Trait-1|Units),
+                data=VB_MC_N,
+                control=lmerControl(optCtrl=list(ftol_abs=1e-10),
+                                    optimizer="bobyqa",
+                                    check.nobs.vs.nlev="ignore",
+                                    check.nobs.vs.nRE="ignore"))
+					)
+
+summary(lmer1)
+show(lmer1)
+isREML(lmer1)
+vcov(lmer1, full=TRUE, ranpar="var") # Variance covariance matrix for all parameters
+getME(lmer1, "theta")
+sigma(lmer1)
+plot(lmer1)
+simulate.lmer(lmer1)
+
+#https://www4.stat.ncsu.edu/~davidian/st732/examples/dental_lmer.R
+lmer1_Varcorr<-VarCorr(lmer1)
+print(lmer1_Varcorr,comp=c("Variance","Std.Dev."),digits=2)
+lmer1_VarcorrDF <- as.data.frame(lmer1_Varcorr,order="lower.tri")
+lmer1_VarcorrDF
+as.data.frame(lmer1_VarcorrDF,order="lower.tri")
+
+
+par(mfrow=c(1,2))
+vv1 <- VarCorr(lmer1)
+## fix unit variance-covariance by adding residual variance:
+diag(vv1$Units) <- diag(vv1$Units)+sigma(lmer1)^2
+corrplot.mixed(cov2cor(vv1$Replicate),upper="ellipse")
+corrplot.mixed(cov2cor(vv1$Units),upper="ellipse")#specifies "var/cov of traits among units (individuals)"
+#lme4: lme4: random effects
+cc2 <- tidy(lmer1,
+            effect = "ran_pars",
+            conf.int = TRUE,
+            conf.method = "profile",
+            parallel="multicore",
+            ncpus=2)
+
+#simY <- simulate(lmer1, nsim)
+library(nlme)
+getVarCov(lmer1, type = "conditional")
+
+#---------------------------------------------------------------------------------------
+#---< Age 1 >
+VB_MC1<-read.csv("VB_MCMC_A1.csv",dec=",",sep=";",header=T,as.is=T)
+str(VB_MC1)
+head(VB_MC1)
+
+Age<-as.factor(VB_MC1$Age)
+Replicate<-as.factor(VB_MC1$Replicate)
+Treatment<-as.factor(VB_MC1$Treatment)
+Units<-as.factor(VB_MC1$Units)
+Trait<-as.factor(VB_MC1$Trait)
+Value<-as.numeric(VB_MC1$Value)
+EAI<-as.numeric(VB_MC1$EAI)
+VB_MC_A1<- data.frame(Units,Treatment,Replicate, Age,Trait,Value,
+                      stringsAsFactors = FALSE)
+
+saveRDS(VB_MC_A1, file="VB_MC_A1.rds")
+str(VB_MC_A1)
+
+t2 <- system.time(
+  lmer2 <- lmer(Value ~ Trait - 1 +
+                  (Trait-1|Replicate) + (Trait-1|Units),
+                data=VB_MC_A1,
+                control=lmerControl(optCtrl=list(ftol_abs=1e-10),
+                                    optimizer="bobyqa",
+                                    check.nobs.vs.nlev="ignore",
+                                    check.nobs.vs.nRE="ignore"))
+)
+
+#getME(lmer2, "theta")
+VarCorr(lmer2) # Estimated random-effects variances, standard deviations, and correlations
+
+summary(lmer2)
+print(lmer2)
+
+# Diagnostic plots
+
+par(mfrow=c(2,2))
+plot(lmer2, type = c("p", "smooth"))
+plot(lmer2, sqrt(abs(resid(.))) ~ fitted(.),
+     type = c("p", "smooth"))
+par(mfrow=c(1,2))
+vv2 <- VarCorr(lmer2)
+vv2
+## fix unit variance-covariance by adding residual variance:
+A1_a<-diag(vv2$Units) <- diag(vv2$Units)+sigma(lmer2)^2
+A1_b<-corrplot.mixed(cov2cor(vv2$Replicate),upper="ellipse",lower="number")
+A1_c<-corrplot.mixed(cov2cor(vv2$Units),upper="ellipse")#specifies "var/cov of traits among units (individuals)"
+A1_a
+A1_b
+A1_c # Specifies "var/cov of traits among units (individuals)"
+
+#--- Variance-covariance matrix
+
+lmer2_Varcorr<-VarCorr(lmer2)
+print(lmer2_Varcorr,comp=c("Variance","Std.Dev."),digits=2)
+lmer2_VarcorrDF <- as.data.frame(lmer2_Varcorr,order="lower.tri")
+lmer2_VarcorrDF
+as.data.frame(lmer2_VarcorrDF,order="lower.tri")
+as.data.frame(lmer2_VarcorrDF,order="cov.last", digits=3)
+
+vcov(lmer2, full = TRUE)
+vcov(lmer3, full = TRUE)
+vcov(lmer4, full = TRUE)
+vcov(lmer5, full = TRUE)
+
+#---------------------------------------------------------------------------------------
+#---< Age 2 >
+VB_MC2<-read.csv("VB_MCMC_A2.csv",dec=",",sep=";",header=T,as.is=T)
+str(VB_MC2)
+head(VB_MC2)
+
+Age<-as.factor(VB_MC2$Age)
+Replicate<-as.factor(VB_MC2$Replicate)
+Treatment<-as.factor(VB_MC2$Treatment)
+Units<-as.factor(VB_MC2$Units)
+Trait<-as.factor(VB_MC2$Trait)
+Value<-as.numeric(VB_MC2$Value)
+EAI<-as.numeric(VB_MC2$EAI)
+VB_MC_A2<- data.frame(Units,Treatment,Replicate, Age,Trait,Value,
+                      stringsAsFactors = FALSE)
+
+saveRDS(VB_MC_A2, file="VB_MC_A2.rds")
+str(VB_MC_A2)
+
+t3 <- system.time(
+  lmer3 <- lmer(Value ~ Trait - 1 +
+                  (Trait-1|Replicate) + (Trait-1|Units),
+                data=VB_MC_A2,
+                control=lmerControl(optCtrl=list(ftol_abs=1e-10),
+                                    optimizer="bobyqa",
+                                    check.nobs.vs.nlev="ignore",
+                                    check.nobs.vs.nRE="ignore"))
+)
+
+#getME(lmer3, "theta")
+VarCorr(lmer3)
+
+summary(lmer3)
+print(lmer3)
+
+par(mfrow=c(2,2))
+vv3 <- VarCorr(lmer3)
+vv3
+#--- fix unit variance-covariance by adding residual variance:
+A2_a<-diag(vv3$Units) <- diag(vv3$Units)+sigma(lmer3)^2
+A2_b<-corrplot.mixed(cov2cor(vv3$Replicate),upper="ellipse")
+A2_c<-corrplot.mixed(cov2cor(vv3$Units),upper="ellipse")#specifies "var/cov of traits among units (individuals)"
+A2_a
+A2_b
+A2_c
+
+#--- Variance-covariance matrix
+lmer3_Varcorr<-VarCorr(lmer3)
+print(lmer3_Varcorr,comp=c("Variance","Std.Dev."),digits=2)
+lmer3_VarcorrDF <- as.data.frame(lmer3_Varcorr,order="lower.tri")
+lmer3_VarcorrDF
+as.data.frame(lmer3_VarcorrDF,order="lower.tri")
+
+#---------------------------------------------------------------------------------------
+#---< Age 3 >
+
+VB_MC3<-read.csv("VB_MCMC_A3.csv",dec=",",sep=";",header=T,as.is=T)
+str(VB_MC3)
+head(VB_MC3)
+
+Age<-as.factor(VB_MC3$Age)
+Replicate<-as.factor(VB_MC3$Replicate)
+Treatment<-as.factor(VB_MC3$Treatment)
+Units<-as.factor(VB_MC3$Units)
+Trait<-as.factor(VB_MC3$Trait)
+Value<-as.numeric(VB_MC3$Value)
+EAI<-as.numeric(VB_MC3$EAI)
+VB_MC_A3<- data.frame(Units,Treatment,Replicate, Age,Trait,Value,
+                      stringsAsFactors = FALSE)
+
+saveRDS(VB_MC_A3, file="VB_MC_A3.rds")
+str(VB_MC_A3)
+
+t4 <- system.time(
+  lmer4 <- lmer(Value ~ Trait - 1 +
+                  (Trait-1|Replicate) + (Trait-1|Units),
+                data=VB_MC_A3,
+                control=lmerControl(optCtrl=list(ftol_abs=1e-10),
+                                    optimizer="bobyqa",
+                                    check.nobs.vs.nlev="ignore",
+                                    check.nobs.vs.nRE="ignore"))
+)
+
+
+all(abs(getME(lmer4,"theta"))>1e-4)
+VarCorr(lmer4)
+
+summary(lmer4)
+print(lmer4)
+
+par(mfrow=c(2,2))
+vv4 <- VarCorr(lmer4)
+vv4
+#--- Fix unit variance-covariance by adding residual variance:
+A3_a<-diag(vv4$Units) <- diag(vv4$Units)+sigma(lmer4)^2
+A3_b<-corrplot.mixed(cov2cor(vv4$Replicate),upper="ellipse")
+A3_c<-corrplot.mixed(cov2cor(vv4$Units),upper="ellipse")#specifies "var/cov of traits among units (individuals)"
+A3_a
+A3_b
+A3_c
+
+#--- Variance-covariance matrix
+#https://www4.stat.ncsu.edu/~davidian/st732/examples/dental_lmer.R
+lmer4_Varcorr<-VarCorr(lmer4)
+print(lmer4_Varcorr,comp=c("Variance","Std.Dev."),digits=2)
+lmer4_VarcorrDF <- as.data.frame(lmer3_Varcorr,order="lower.tri")
+lmer4_VarcorrDF
+as.data.frame(lmer4_VarcorrDF,order="lower.tri")
+
+#---------------------------------------------------------------------------------------
+#---< Age 4 >
+
+VB_MC4<-read.csv("VB_MCMC_A4.csv",dec=",",sep=";",header=T,as.is=T)
+str(VB_MC4)
+head(VB_MC4)
+
+Age<-as.factor(VB_MC4$Age)
+Replicate<-as.factor(VB_MC4$Replicate)
+Treatment<-as.factor(VB_MC4$Treatment)
+Units<-as.factor(VB_MC4$Units)
+Trait<-as.factor(VB_MC4$Trait)
+Value<-as.numeric(VB_MC4$Value)
+EAI<-as.numeric(VB_MC4$EAI)
+VB_MC_A4<- data.frame(Units,Treatment,Replicate, Age,Trait,Value,
+                      stringsAsFactors = FALSE)
+
+saveRDS(VB_MC_A4, file="VB_MC_A4.rds")
+str(VB_MC_A4)
+
+t5 <- system.time(
+  lmer5 <- lmer(Value ~ Trait - 1 +
+                  (Trait-1|Replicate) + (Trait-1|Units),
+                data=VB_MC_A4,
+                control=lmerControl(optCtrl=list(ftol_abs=1e-10),
+                                    optimizer="bobyqa",
+                                    check.nobs.vs.nlev="ignore",
+                                    check.nobs.vs.nRE="ignore"))
+)
+
+
+all(abs(getME(lmer5,"theta"))>1e-4)
+VarCorr(lmer5)
+
+summary(lmer5)
+print(lmer5)
+
+par(mfrow=c(2,2))
+layout.show(4) 
+
+vv5 <- VarCorr(lmer5)
+vv5
+#-- Fix unit variance-covariance by adding residual variance:
+A4_a<-diag(vv5$Units) <- diag(vv5$Units)+sigma(lmer5)^2
+A4_b<-corrplot.mixed(cov2cor(vv5$Replicate),upper="ellipse")
+A4_c<-corrplot.mixed(cov2cor(vv5$Units),upper="ellipse")#specifies "var/cov of traits among units (individuals)"
+A4_a
+A4_b
+A4_c#specifies "var/cov of traits among units (individuals)"
+
+
+#--- Variance-covariance matrix
+#https://www4.stat.ncsu.edu/~davidian/st732/examples/dental_lmer.R
+lmer5_Varcorr<-VarCorr(lmer5)
+print(lmer5_Varcorr,comp=c("Variance","Std.Dev."),digits=2)
+lmer5_VarcorrDF <- as.data.frame(lmer3_Varcorr,order="lower.tri")
+lmer5_VarcorrDF
+as.data.frame(lmer5_VarcorrDF,order="cov.last", digits=3)
+as.data.frame(lmer5_VarcorrDF,order="lower.tri", digits=3)
+
+#--- Variance-covariance matrix: estimate covariance using correlation and variance
+
+VarCorr2<-VarCorr(lmer2,comp=c("Variance"))
+print(VarCorr2,comp=c("Variance","Std.Dev."),digits=2)
+VarCorr3<-VarCorr(lmer3,comp=c("Variance"))
+print(VarCorr3,comp=c("Variance","Std.Dev."),digits=2)
+VarCorr4<-VarCorr(lmer4,comp=c("Variance"))
+print(VarCorr4,comp=c("Variance","Std.Dev."),digits=2)
+VarCorr5<-VarCorr(lmer5,comp=c("Variance"))
+print(VarCorr5,comp=c("Variance","Std.Dev."),digits=2)
+
+#---------------------------------------------------------------------------------------
+#--- PLOTS
+
+tiff("MCMC.tiff", width = 6, height = 5.5,units = 'in',res=600)
+
+op<-par(no.readonly = T)
+par(mfrow = c(2,2))
+par(oma=c(0.5,0,.5, 0), mar=c(1, 1, 1, 1))
+layout.show(4)
+
+corrplot.mixed(cov2cor(vv2$Units),upper="ellipse")
+mtext("Age_1",side = 3, line = 0, outer = F, cex = 0.8, font = 1)
+corrplot.mixed(cov2cor(vv3$Units),upper="ellipse")
+mtext("Age_2",side = 3, line = 0, outer = F, cex = 0.8, font = 1)
+corrplot.mixed(cov2cor(vv4$Units),upper="ellipse")
+mtext("Age_3",side = 3, line = 0, outer = F, cex = 0.8, font = 1)
+corrplot.mixed(cov2cor(vv5$Units),upper="ellipse")
+mtext("Age_4",side = 3, line = 0, outer = F, cex = .8, font = 1)
+
+dev.off()
+
+tiff("CoefficientPlot.tiff", width = 6, height = 5.5,units = 'in',res=600)
+
+t1 <- tidy(lmer2)
+t2 <- tidy(lmer3)
+t3 <- tidy(lmer4)
+t4 <- tidy(lmer5)
+tt_comb <- bind_rows(lmer_Age1=t1,lmer_Age2=t2,lmer_Age3=t3,lmer_Age4=t4,.id="model") %>%
+  filter(effect=="fixed")
+dwplot(tt_comb,dot_args = list(size = 2.5),whisker_args = list(size = .8),style = "dotwhisker")+
+   geom_vline(xintercept=0,lty=1,col="red")
+
+dev.off()
+
+#--- Units= Treatement effects in relation to each behaviour measurements
+# PLOTS_ AGE_1
+tiff("Uni_Age_1.tiff", width = 6, height = 5.5,units = 'in',res=600)
+corrplot.mixed(cov2cor(vv2$Units),upper="ellipse")
+mtext("Age_1",side = 3, line = 2, outer = F, cex = 0.8, font = 1)
+dev.off()
+#PLOTS_ AGE_2
+tiff("Uni_Age_2.tiff", width = 6, height = 5.5,units = 'in',res=600)
+corrplot.mixed(cov2cor(vv3$Units),upper="ellipse")
+mtext("Age_2",side = 3, line = 2, outer = F, cex = 0.8, font = 1)
+dev.off()
+#PLOTS_ AGE_3
+tiff("Uni_Age_3.tiff", width = 6, height = 5.5,units = 'in',res=600)
+corrplot.mixed(cov2cor(vv4$Units),upper="ellipse")
+mtext("Age_3",side = 3, line = 2, outer = F, cex = 0.8, font = 1)
+dev.off()
+#PLOTS_ AGE_4
+tiff("Uni_Age_4.tiff", width = 6, height = 5.5,units = 'in',res=600)
+corrplot.mixed(cov2cor(vv5$Units),upper="ellipse")
+mtext("Age_4",side = 3, line = 2, outer = F, cex = .8, font = 1)
+dev.off()
+
+
+#--- Replicate= individual larva in each behaviour measurements
+#...PLOTS_ AGE_1
+tiff("Rep_Age_1.tiff", width = 6, height = 5.5,units = 'in',res=600)
+corrplot.mixed(cov2cor(vv2$Replicate),upper="ellipse")
+mtext("Age_1",side = 3, line = 2, outer = F, cex = 0.8, font = 1)
+dev.off()
+
+#...PLOTS_ AGE_2
+
+tiff("Rep_Age_2.tiff", width = 6, height = 5.5,units = 'in',res=600)
+corrplot.mixed(cov2cor(vv3$Replicate),upper="ellipse")
+mtext("Age_2",side = 3, line = 2, outer = F, cex = 0.8, font = 1)
+dev.off()
+#...PLOTS_ AGE_3
+
+tiff("Rep_Age_3.tiff", width = 6, height = 5.5,units = 'in',res=600)
+corrplot.mixed(cov2cor(vv4$Replicate),upper="ellipse")
+mtext("Age_3",side = 3, line = 2, outer = F, cex = 0.8, font = 1)
+dev.off()
+
+#....PLOTS_ AGE_4
+tiff("Rep_Age_4.tiff", width = 6, height = 5.5,units = 'in',res=600)
+corrplot.mixed(cov2cor(vv5$Replicate),upper="ellipse")
+mtext("Age_4",side = 3, line = 2, outer = F, cex = .8, font = 1)
+dev.off()
+
+
+#---------------------------------------------------------------------------------------
+#--- Repeatability
+#---------------------------------------------------------------------------------------
+
+#---Packages
+library(devtools)
+library(rptR)
+citation("rptR")
+
+#---------------------------------------------------------------------------------------
+#--- < All ages >
+
+VB_All<-read.csv("VB_MCMC.csv",dec=",",sep=";",header=T,as.is=T)
+str(VB_All)
+head(VB_All)
+
+Age<-as.factor(VB_All$Age)
+Replicate<-as.factor(VB_All$Replicate)
+Treatment<-as.factor(VB_All$Treatment)
+Units<-as.factor(VB_All$Units)
+Trait<-as.factor(VB_All$Trait)
+Value<-as.numeric(VB_All$Value)
+EAI<-as.numeric(VB_All$EAI)
+VB_MC_All<- data.frame(Units,Treatment,Replicate, Age,Trait,Value,
+                       stringsAsFactors = FALSE)
+str(VB_MC_All)
+
+R_AgeAll<- rpt(Value ~ Age+Treatment+(1 | Units),grname="Units"
+               , data = VB_MC_All, datatype = "Gaussian",  
+               nboot = 1000, npermut = 1000)
+print(R_AgeAll)
+summary(R_AgeAll)
+plot(R_AgeAll, grname= "Units", scale="link",cex.main=0.8,main="All ages:Individual Variance",las=1)
+
+#---------------------------------------------------------------------------------------
+#--- < Age 1 >
+
+VB_MC1<-read.csv("Rep_MCMC_A1.csv",dec=",",sep=";",header=T,as.is=T)
+str(VB_MC1)
+head(VB_MC1)
+
+Age<-as.factor(VB_MC1$Age)
+Replicate<-as.factor(VB_MC1$Replicate)
+Treatment<-as.factor(VB_MC1$Treatment)
+Units<-as.factor(VB_MC1$Units)
+Trait<-as.factor(VB_MC1$Trait)
+Value<-as.numeric(VB_MC1$Value)
+EAI<-as.numeric(VB_MC1$EAI)
+VB_Rep_A1<- data.frame(Units,Treatment,Replicate, Age,Trait,Value,
+                       stringsAsFactors = FALSE)
+
+str(VB_Rep_A1)
+summary(VB_Rep_A1)
+Rep_Age1<-rpt(Value ~ Treatment + (1 | Units),grname="Units"
+              , data = VB_Rep_A1, datatype = "Gaussian",  
+              nboot = 1000, npermut = 1000)
+print(Rep_Age1)
+summary(Rep_Age1)
+plot(Rep_Age1, grname= "Units", scale="link",cex.main=0.8,main="Age_1:Individual Variance",las=1)
+
+#---------------------------------------------------------------------------------------
+#--- < Age 2 >
+
+VB_MC2<-read.csv("Rep_MCMC_A2.csv",dec=",",sep=";",header=T,as.is=T)
+str(VB_MC2)
+head(VB_MC2)
+
+Age<-as.factor(VB_MC2$Age)
+Replicate<-as.factor(VB_MC2$Replicate)
+Treatment<-as.factor(VB_MC2$Treatment)
+Units<-as.factor(VB_MC2$Units)
+Trait<-as.factor(VB_MC2$Trait)
+Value<-as.numeric(VB_MC2$Value)
+EAI<-as.numeric(VB_MC2$EAI)
+VB_Rep_A2<- data.frame(Units,Treatment,Replicate, Age,Trait,Value,
+                       stringsAsFactors = FALSE)
+str(VB_Rep_A2)
+
+Rep_Age2<-rpt(Value ~ Treatment + (1 | Units),grname="Units"
+              , data = VB_Rep_A2, datatype = "Gaussian",  
+              nboot = 1000, npermut = 1000)
+print(Rep_Age2)
+summary(Rep_Age2)
+plot(Rep_Age2, grname= "Units", scale="link",cex.main=0.8,main="Age_2:Individual Variance",las=1)
+
+#---------------------------------------------------------------------------------------
+#--- < Age 3 >
+
+VB_MC3<-read.csv("Rep_MCMC_A3.csv",dec=",",sep=";",header=T,as.is=T)
+str(VB_MC3)
+head(VB_MC3)
+
+Age<-as.factor(VB_MC3$Age)
+Replicate<-as.factor(VB_MC3$Replicate)
+Treatment<-as.factor(VB_MC3$Treatment)
+Units<-as.factor(VB_MC3$Units)
+Trait<-as.factor(VB_MC3$Trait)
+Value<-as.numeric(VB_MC3$Value)
+EAI<-as.numeric(VB_MC3$EAI)
+VB_Rep_A3<- data.frame(Units,Treatment,Replicate, Age,Trait,Value,
+                       stringsAsFactors = FALSE)
+str(VB_Rep_A3)
+
+Rep_Age3<-rpt(Value ~ Treatment + (1 | Units),grname="Units"
+              , data = VB_Rep_A3, datatype = "Gaussian",  
+              nboot = 1000, npermut = 1000)
+print(Rep_Age3)
+summary(Rep_Age3)
+plot(Rep_Age3, grname= "Units", scale="link",cex.main=0.8,main="Age_3:Individual Variance",las=1)
+
+#---------------------------------------------------------------------------------------
+#--- < Age 4 >
+
+VB_MC4<-read.csv("Rep_MCMC_A4.csv",dec=",",sep=";",header=T,as.is=T)
+str(VB_MC4)
+head(VB_MC4)
+
+Age<-as.factor(VB_MC4$Age)
+Replicate<-as.factor(VB_MC4$Replicate)
+Treatment<-as.factor(VB_MC4$Treatment)
+Units<-as.factor(VB_MC4$Units)
+Trait<-as.factor(VB_MC4$Trait)
+Value<-as.numeric(VB_MC4$Value)
+EAI<-as.numeric(VB_MC4$EAI)
+VB_Rep_A4<- data.frame(Units,Treatment,Replicate, Age,Trait,Value,
+                       stringsAsFactors = FALSE)
+str(VB_Rep_A4)
+
+Rep_Age4<-rpt(Value ~ Treatment + (1 | Units),grname="Units"
+              , data = VB_Rep_A4, datatype = "Gaussian",  
+              nboot = 1000, npermut = 1000)
+
+print(Rep_Age4)
+summary(Rep_Age4)
+plot(Rep_Age4, grname= "Units", scale="link",cex.main=0.8,main="Age_4:Individual Variance",las=1)
+
+#---------------------------------------------------------------------------------------
+#--- PLOTS
+
+tiff("Rep_Plot.tiff", width = 6, height = 5.5,units = 'in', res=600)
+
+par(no.readonly = TRUE)
+par(mfrow = c(2,2))
+par(mar = c(3.4,3,1.0,0.5))#outer margin: bottom, left, top and right side
+par(mgp = c(2,0.8, 0))#axis title, axis labels and axis line default c(3,1,0) 
+layout.show(4)
+
+plot(Rep_Age1, grname= "Units", scale="link",cex.main=0.8,main="Age_1:Individual-base Variance",las=1)
+plot(Rep_Age2, grname= "Units", scale="link",cex.main=0.8,main="Age_2:Individual-base Variance",las=1)
+plot(Rep_Age3, grname= "Units", scale="link",cex.main=0.8,main="Age_3:Individual-base Variance",las=1)
+plot(Rep_Age4, grname= "Units", scale="link",cex.main=0.8,main="Age_4:Individual-base Variance",las=1)
+
+dev.off()
+
+#---------------------------------------------------------------------------------------
+#--- Environmental effects
+#---------------------------------------------------------------------------------------
+
+#--- Packages
+library(lmerTest)
+library(lme4)
+library(glmmML)
+library(MASS)
+
+#---------------------------------------------------------------------------------------
+#--- < Lagoon >
+Mod_Lag<-read.csv("Mod_Lagoon.csv",dec=",",sep=";",header=T,as.is=T)
+str(Mod_Lag)
+head(Mod_Lag)
+summary(Dat_Mod_Lag)
+
+Age<-as.factor(Mod_Lag$Age)
+Treatment<-as.factor(Mod_Lag$Treatment)
+Units<-as.factor(Mod_Lag$Units)
+PI<-as.numeric(Mod_Lag$PI)
+EAI<-as.numeric(Mod_Lag$EAI)
+Dat_Mod_Lag<- data.frame(Units,Treatment, Age,PI,EAI,
+                       stringsAsFactors = FALSE)
+str(Dat_Mod_Lag)
+plot(density(Dat_Mod_Lag$PI))
+
+#--- PI
+Mod_Lag_PI<-lmer(PI~Age+(1|Units),data=Dat_Mod_Lag)
+summary(Mod_Lag_PI)
+coef(Mod_Lag_PI)
+print(Mod_Lag_PI)
+anova(Mod_Lag_PI)
+
+#--- EAI
+Mod_Lag_EAI<-lmer(EAI~Age+(1|Units),data=Dat_Mod_Lag)
+summary(Mod_Lag_EAI)
+coef(Mod_Lag_EAI)
+anova(Mod_Lag_EAI)
+print(Mod_Lag_EAI)
+
+#--- Repeatability_PI
+R_Lag_PI<- rpt(PI ~ Age+(1|Units),grname="Units"
+               , data = Dat_Mod_Lag, datatype = "Gaussian",  
+               nboot = 1000, npermut = 1000)
+print(R_Lag_PI)
+plot(R_Lag_PI, grname= "Units", scale="link",cex.main=0.8,main="PI:Individual Variance",las=1)
+
+plot(PI)
+
+#---Repeatability__EAI
+R_Lag_EAI<- rpt(EAI ~ Age+(1|Units),grname="Units"
+               , data = Dat_Mod_Lag, datatype = "Gaussian",  
+               nboot = 1000, npermut = 1000)
+print(R_Lag_EAI)
+plot(R_Lag_EAI, grname= "Units", scale="link",cex.main=0.8,main="EAI:Individual Variance",las=1)
+
+#---------------------------------------------------------------------------------------
+#--- < Coastal >
+
+Mod_Cos<-read.csv("Mod_Coastal.csv",dec=",",sep=";",header=T,as.is=T)
+str(Mod_Cos)
+head(Mod_Cos)
+
+Age<-as.factor(Mod_Cos$Age)
+Treatment<-as.factor(Mod_Cos$Treatment)
+Units<-as.factor(Mod_Cos$Units)
+PI<-as.numeric(Mod_Cos$PI)
+EAI<-as.numeric(Mod_Cos$EAI)
+Dat_Mod_Cost<- data.frame(Units,Treatment, Age,PI,EAI,
+                         stringsAsFactors = FALSE)
+str(Dat_Mod_Cost)
+plot(density(Dat_Mod_Cost$PI))
+plot(density(Dat_Mod_Cost$EAI))
+
+#--- PI
+Mod_Cost_PI<-lmer(PI~Age+(1|Units),data=Dat_Mod_Cost)
+summary(Mod_Cost_PI)
+coef(Mod_Cost_PI)
+print(Mod_Cost_PI)
+anova(Mod_Cost_PI)
+
+#--- EAI
+summary(Dat_Mod_Cost)
+Mod_Cost_EAI<-lmer(EAI~Age+(1|Units),data=Dat_Mod_Cost)
+summary(Mod_Cost_EAI)
+coef(Mod_Cost_EAI)
+anova(Mod_Cost_EAI)
+print(Mod_Cost_EAI)
+
+
+#--- Repeatability_PI
+R_Cost_PI<- rpt(PI ~ Age+(1|Units),grname="Units"
+               , data = Dat_Mod_Cost, datatype = "Gaussian",  
+               nboot = 1000, npermut = 1000)
+print(R_Cost_PI)
+plot(R_Cost_PI, grname= "Units", scale="link",cex.main=0.8,main="PI:Individual Variance",las=1)
+
+#--- Repeatability__EAI
+R_Cost_EAI<- rpt(EAI ~ Age+(1|Units),grname="Units"
+                , data = Dat_Mod_Cost, datatype = "Gaussian",  
+                nboot = 1000, npermut = 1000)
+print(R_Cost_EAI)
+plot(R_Cost_EAI, grname= "Units", scale="link",cex.main=0.8,main="EAI:Individual Variance",las=1)
+
+#---------------------------------------------------------------------------------------
+#--- < Increase of temperature >
+
+Mod_Temp<-read.csv("Mod_Temp.csv",dec=",",sep=";",header=T,as.is=T)
+str(Mod_Temp)
+head(Mod_Temp)
+
+Age<-as.factor(Mod_Temp$Age)
+Treatment<-as.factor(Mod_Temp$Treatment)
+Units<-as.factor(Mod_Temp$Units)
+PI<-as.numeric(Mod_Temp$PI)
+EAI<-as.numeric(Mod_Temp$EAI)
+Dat_Mod_Temp<- data.frame(Units,Treatment, Age,PI,EAI,
+                          stringsAsFactors = FALSE)
+str(Dat_Mod_Temp)
+plot(density(Dat_Mod_Temp$PI))
+
+#--- PI
+Mod_Temp_PI<-lmer(PI~Age+(1|Units),data=Dat_Mod_Temp)
+summary(Mod_Temp_PI)
+coef(Mod_Temp_PI)
+print(Mod_Temp_PI)
+anova(Mod_Temp_PI)
+
+#--- EAI
+summary(Dat_Mod_Temp)
+Mod_Temp_EAI<-lmer(EAI~Age+(1|Units),data=Dat_Mod_Temp)
+summary(Mod_Temp_EAI)
+coef(Mod_Temp_EAI)
+anova(Mod_Temp_EAI)
+print(Mod_Temp_EAI)
+
+#--- Repeatability_PI
+R_Temp_PI<- rpt(PI ~ Age+(1|Units),grname="Units"
+                , data = Dat_Mod_Temp, datatype = "Gaussian",  
+                nboot = 1000, npermut = 1000)
+print(R_Temp_PI)
+plot(R_Temp_PI, grname= "Units", scale="link",cex.main=0.8,main="PI:Individual Variance",las=1)
+
+#--- Repeatability__EAI
+R_Temp_EAI<- rpt(EAI ~ Age+(1|Units),grname="Units"
+                 , data = Dat_Mod_Temp, datatype = "Gaussian",  
+                 nboot = 1000, npermut = 1000)
+print(R_Temp_EAI)
+plot(R_Temp_EAI, grname= "Units", scale="link",cex.main=0.8,main="EAI:Individual Variance",las=1)
+
+#---------------------------------------------------------------------------------------
+#--- < Salinity >
+
+Mod_Sal<-read.csv("Mod_Sal.csv",dec=",",sep=";",header=T,as.is=T)
+str(Mod_Sal)
+head(Mod_Sal)
+
+Age<-as.factor(Mod_Sal$Age)
+Treatment<-as.factor(Mod_Sal$Treatment)
+Units<-as.factor(Mod_Sal$Units)
+PI<-as.numeric(Mod_Sal$PI)
+EAI<-as.numeric(Mod_Sal$EAI)
+Dat_Mod_Sal<- data.frame(Units,Treatment, Age,PI,EAI,
+                          stringsAsFactors = FALSE)
+str(Dat_Mod_Sal)
+plot(density(Dat_Mod_Sal$PI))
+
+#--- PI
+Mod_Sal_PI<-lmer(PI~Age+(1|Units),data=Dat_Mod_Sal)
+summary(Mod_Sal_PI)
+coef(Mod_Sal_PI)
+print(Mod_Sal_PI)
+anova(Mod_Sal_PI)
+
+#--- EAI
+summary(Dat_Mod_Sal)
+Mod_Sal_EAI<-lmer(EAI~Age+(1|Units),data=Dat_Mod_Sal)
+summary(Mod_Sal_EAI)
+coef(Mod_Sal_EAI)
+anova(Mod_Sal_EAI)
+print(Mod_Sal_EAI)
+
+#--- Repeatability_PI
+R_Sal_PI<- rpt(PI ~ Age+(1|Units),grname="Units"
+                , data = Dat_Mod_Sal, datatype = "Gaussian",  
+                nboot = 1000, npermut = 1000)
+print(R_Sal_PI)
+plot(R_Sal_PI, grname= "Units", scale="link",cex.main=0.8,main="PI:Individual Variance",las=1)
+
+#--- Repeatability__EAI
+R_Sal_EAI<- rpt(EAI ~ Age+(1|Units),grname="Units"
+                 , data = Dat_Mod_Sal, datatype = "Gaussian",  
+                 nboot = 1000, npermut = 1000)
+print(R_Sal_EAI)
+plot(R_Sal_EAI, grname= "Units", scale="link",cex.main=0.8,main="EAI:Individual Variance",las=1)
+
+
+#---------------------------------------------------------------------------------------
+#--- PLOTS
+tiff("Rep_Plot_Habitats.tiff", width = 6, height = 5.5,units = 'in', res=600)
+
+par(no.readonly = TRUE)
+par(mfrow = c(2,4))
+par(mar = c(3.4,3.5,1.0,0.8))#outer margin: bottom, left, top and right side
+par(mgp = c(2.4,0.6, 0))#axis title, axis labels and axis line default c(3,1,0) 
+layout.show(8)
+
+#PI
+plot(R_Lag_PI, grname= "Units", scale="link",cex.main=0.8,main="Lagoon habitat:Individual Variance",las=1)
+plot(R_Cost_PI, grname= "Units", scale="link",cex.main=0.8,main="Coastal habitat:Individual Variance",las=1)
+plot(R_Temp_PI, grname= "Units", scale="link",cex.main=0.8,main="Temperature:Individual Variance",las=1)
+plot(R_Sal_PI, grname= "Units", scale="link",cex.main=0.8,main="Salinity:Individual Variance",las=1)
+#EAI
+plot(R_Lag_EAI, grname= "Units", scale="link",cex.main=0.8,main="Lagon Habitat:Individual Variance",las=1)
+plot(R_Cost_EAI, grname= "Units", scale="link",cex.main=0.8,main="Coastal habitat:Individual Variance",las=1)
+plot(R_Temp_EAI, grname= "Units", scale="link",cex.main=0.8,main="Temperature:Individual Variance",las=1)
+plot(R_Sal_EAI, grname= "Units", scale="link",cex.main=0.8,main="EAI:Individual Variance",las=1)
+
+dev.off()
+
+tiff("Rep_EAI_Habitats.tiff", width = 6, height = 5.5,units = 'in', res=800)
+
+par(no.readonly = TRUE)
+par(mfrow = c(2,2))
+par(mar = c(3.4,3.3,1.0,0.8))#outer margin: bottom, left, top and right side
+par(mgp = c(2.4,0.8, 0))#axis title, axis labels and axis line default c(3,1,0) 
+layout.show(4)
+#EAI
+plot(R_Lag_EAI, grname= "Units", scale="link",cex.main=0.8,main="EAI:Individual Variance",las=1)
+plot(R_Cost_EAI, grname= "Units", scale="link",cex.main=0.8,main="EAI:Individual Variance",las=1)
+plot(R_Temp_EAI, grname= "Units", scale="link",cex.main=0.8,main="EAI:Individual Variance",las=1)
+plot(R_Sal_EAI, grname= "Units", scale="link",cex.main=0.8,main="EAI:Individual Variance",las=1)
+dev.off()
+
+#-------------------------------------- END --------------------------------------------
